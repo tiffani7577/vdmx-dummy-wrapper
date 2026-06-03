@@ -65,11 +65,14 @@ export default function AbletonGrid() {
       const res = await fetch('/api/vdmx/ableton/state');
       if (res.ok) {
         const data = await res.json();
-        setState(data.state);
-        setConnected(data.state.numTracks > 0 || data.state.tempo !== 120);
-        setLastRefresh(new Date());
+        if (data && data.state) {
+          setState(data.state);
+          setConnected(data.state.numTracks > 0 || (data.state.tempo && data.state.tempo !== 120));
+          setLastRefresh(new Date());
+        }
       }
-    } catch {
+    } catch (e) {
+      console.error('[ABLETON] State fetch failed:', e);
       setConnected(false);
     }
   }, []);
@@ -123,12 +126,15 @@ export default function AbletonGrid() {
   }, [fetchState]);
 
   // Build display grid (up to MAX_TRACKS x MAX_SCENES)
-  const displayTracks = Math.max(state.numTracks, 4);
-  const displayScenes = Math.max(state.numScenes, 4);
+  const displayTracks = Math.max(state?.numTracks || 0, 4);
+  const displayScenes = Math.max(state?.numScenes || 0, 4);
   const visibleTracks = Math.min(displayTracks, MAX_TRACKS);
   const visibleScenes = Math.min(displayScenes, MAX_SCENES);
 
   const getClipSlot = (t: number, s: number): ClipSlot => {
+    if (!state?.clips || !Array.isArray(state.clips)) {
+      return { trackIndex: t, clipIndex: s, name: '', status: 0, hasClip: false };
+    }
     return state.clips?.[t]?.[s] ?? {
       trackIndex: t,
       clipIndex: s,
