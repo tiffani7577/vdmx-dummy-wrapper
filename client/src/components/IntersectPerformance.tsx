@@ -33,9 +33,13 @@ export default function IntersectPerformance() {
         const res = await fetch('/api/vdmx/discover');
         if (res.ok) {
           const data = await res.json();
-          setInstalledShaders(data.shaders || []);
+          if (data && Array.isArray(data.shaders)) {
+            setInstalledShaders(data.shaders);
+          }
         }
-      } catch (e) {}
+      } catch (e) {
+        console.error('[INTERSECT] Discovery failed:', e);
+      }
     };
     discover();
   }, []);
@@ -102,7 +106,10 @@ export default function IntersectPerformance() {
     toast.success(`Chain Activated: ${chain.name}`);
   };
 
-  const isInstalled = (id: string) => installedShaders.includes(id) || true; // Default true for built-ins
+  const isInstalled = (id: string) => {
+    if (!installedShaders || !Array.isArray(installedShaders)) return true;
+    return installedShaders.includes(id) || true;
+  };
 
   return (
     <div className="space-y-6">

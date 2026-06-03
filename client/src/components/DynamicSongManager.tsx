@@ -18,8 +18,19 @@ export default function DynamicSongManager() {
   const [newSong, setNewSong] = useState({ name: '', bpm: 120, mediaBinPage: 0, vdmxPreset: '' });
 
   const fetchSongs = async () => {
-    const res = await fetch('/api/vdmx/songs');
-    if (res.ok) setSongs(await res.json());
+    try {
+      const res = await fetch('/api/vdmx/songs');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setSongs(data);
+        } else if (data && Array.isArray(data.songs)) {
+          setSongs(data.songs);
+        }
+      }
+    } catch (e) {
+      console.error('[SONGS] Fetch failed:', e);
+    }
   };
 
   useEffect(() => { fetchSongs(); }, []);
