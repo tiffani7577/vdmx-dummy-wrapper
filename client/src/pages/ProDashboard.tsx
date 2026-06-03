@@ -17,10 +17,12 @@ import AbletonGrid from '@/components/AbletonGrid';
 import DynamicSongManager from '@/components/DynamicSongManager';
 import IntersectPerformance from '@/components/IntersectPerformance';
 import VDMXStatus from '@/components/VDMXStatus';
+import SetupWizard from '@/components/SetupWizard';
 
 export default function ProDashboard() {
   const [bpm, setBpm] = useState(120);
   const [showMode, setShowMode] = useState(false);
+  const [showWizard, setShowWizard] = useState(() => !localStorage.getItem('intersect_setup_complete'));
   const [activeSong, setActiveSong] = useState<string | null>(null);
 
   // Fetch current state periodically
@@ -41,6 +43,12 @@ export default function ProDashboard() {
 
   return (
     <div className="min-h-screen bg-black text-gray-100 font-sans selection:bg-purple-500/30">
+      {showWizard && (
+        <SetupWizard onComplete={() => {
+          localStorage.setItem('intersect_setup_complete', 'true');
+          setShowWizard(false);
+        }} />
+      )}
       {/* Top Status Bar */}
       <div className="border-b border-gray-800 bg-gray-950/50 backdrop-blur-md sticky top-0 z-50">
         <div className="max-w-[1600px] mx-auto px-4 h-14 flex items-center justify-between">
