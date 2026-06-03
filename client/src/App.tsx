@@ -2,6 +2,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
 import ProDashboard from "@/pages/ProDashboard";
+import ErrorBoundary from "@/components/ErrorBoundary";
 import SongSwitcher from "@/pages/SongSwitcher";
 import Dashboard from "@/pages/Dashboard";
 import Home from "@/pages/Home";
@@ -12,8 +13,16 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 function Router() {
   return (
     <Switch>
-      <Route path={"/"} component={ProDashboard} />
-      <Route path={"/pro"} component={ProDashboard} />
+      <Route path={"/"}>
+        <ErrorBoundary>
+          <ProDashboard />
+        </ErrorBoundary>
+      </Route>
+      <Route path={"/pro"}>
+        <ErrorBoundary>
+          <ProDashboard />
+        </ErrorBoundary>
+      </Route>
       <Route path={"/songs"} component={SongSwitcher} />
       <Route path={"/dashboard"} component={Dashboard} />
       <Route path={"/home"} component={Home} />

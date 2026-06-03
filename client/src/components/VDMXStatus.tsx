@@ -37,10 +37,12 @@ export default function VDMXStatus() {
     fetch('/api/vdmx/config')
       .then((r) => r.json())
       .then((d) => {
-        if (d.vdmx) setVdmxConfig(d.vdmx);
-        if (d.ableton) setAbletonConfig(d.ableton);
+        if (d) {
+          if (d.vdmx) setVdmxConfig(d.vdmx);
+          if (d.ableton) setAbletonConfig(d.ableton);
+        }
       })
-      .catch(() => {});
+      .catch((e) => console.error('[VDMX] Config fetch failed:', e));
   }, []);
 
   const testConnection = async () => {
