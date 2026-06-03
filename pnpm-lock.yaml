@@ -166,6 +166,9 @@ importers:
       next-themes:
         specifier: ^0.4.6
         version: 0.4.6(react-dom@19.2.1(react@19.2.1))(react@19.2.1)
+      node-osc:
+        specifier: ^11.5.0
+        version: 11.5.0
       react:
         specifier: ^19.2.1
         version: 19.2.1
@@ -3610,6 +3613,10 @@ packages:
     peerDependencies:
       react: ^16.8 || ^17 || ^18 || ^19 || ^19.0.0-rc
       react-dom: ^16.8 || ^17 || ^18 || ^19 || ^19.0.0-rc
+
+  node-osc@11.5.0:
+    resolution: {integrity: sha512-0a3+3XHGvg0obDNSjXIaR1GQ9xYMUzUbTqENHiJ1d5OfRZNRTrShEfn7IHjiZ4wWgflzolD6j6Q/5o7seVROww==}
+    engines: {node: ^20.9.0 || ^22.11.0 || >=24.0.0}
 
   node-releases@2.0.23:
     resolution: {integrity: sha512-cCmFDMSm26S6tQSDpBCg/NR8NENrVPhAJSf+XbxBG4rPFaaonlEoE9wHQmun+cls499TQGSb7ZyPBRlzgKfpeg==}
@@ -8220,6 +8227,8 @@ snapshots:
     dependencies:
       react: 19.2.1
       react-dom: 19.2.1(react@19.2.1)
+
+  node-osc@11.5.0: {}
 
   node-releases@2.0.23: {}
 
