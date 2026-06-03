@@ -2,12 +2,21 @@ import { Router, Request, Response } from 'express';
 import OSCSender from '../services/osc-sender.js';
 import AbletonOSCService from '../services/ableton-osc.js';
 import { OSCQueryDiscovery } from '../services/oscquery-discovery.js';
+import { buildIntersectMappings } from '../../shared/intersect-osc-mapping.js';
+import {
+  EFFECTS,
+  GENERATORS,
+  AUDIO_MAPPINGS,
+  BLEND_MODES,
+  MASTER_CONTROLS,
+} from '../../shared/intersect-configs.js';
+import { INTERSECT_TEMPLATE_EFFECTS } from '../../shared/intersect-template-effects.js';
+import { generateVdmxControlSurfaceJson } from '../../shared/vdmx-control-surface.js';
 import { db } from '../db.js';
 import { songs, programSlots } from "../../drizzle/schema.js";
 import { eq } from 'drizzle-orm';
 
 const router = Router();
-const discovery = new OSCQueryDiscovery();
 
 // Cache for last sent values to prevent feedback loops
 const lastSentValues: Record<string, any> = {};
@@ -18,6 +27,8 @@ let vdmxConfig = {
   oscPort: parseInt(process.env.VDMX_OSC_PORT || '1234'),
   oscQueryPort: parseInt(process.env.VDMX_OSCQUERY_PORT || '2345'),
 };
+
+const discovery = new OSCQueryDiscovery(vdmxConfig.host, vdmxConfig.oscQueryPort);
 
 // ─── Ableton OSC Configuration ────────────────────────────────────────────────
 let abletonConfig = {
@@ -50,6 +61,7 @@ router.post('/config', (req: Request, res: Response) => {
   if (oscPort) vdmxConfig.oscPort = Number(oscPort);
   if (oscQueryPort) vdmxConfig.oscQueryPort = Number(oscQueryPort);
   oscSender.updateTarget(vdmxConfig.host, vdmxConfig.oscPort);
+  discovery.updateTarget(vdmxConfig.host, vdmxConfig.oscQueryPort);
   res.json({ success: true, config: vdmxConfig });
 });
 
@@ -118,14 +130,43 @@ router.delete('/songs/:id', async (req: Request, res: Response) => {
 });
 
 // ─── OSCQuery Discovery ───────────────────────────────────────────────────────
-router.get('/discover', async (req: Request, res: Response) => {
+router.get('/discover', async (_req: Request, res: Response) => {
   try {
     const tree = await discovery.discover();
-    const shaders = await discovery.getInstalledShaders();
-    res.json({ tree, shaders });
+    const parameters = tree ? discovery.getAllParameters(tree) : [];
+    const shaders = tree ? await discovery.getInstalledShaders() : [];
+    const templateEffectControls = INTERSECT_TEMPLATE_EFFECTS.map((effect) => ({
+      id: effect.id,
+      name: effect.intersectLabel,
+      osc: effect.osc,
+      aliases: [effect.vdmxIsfName],
+    }));
+
+    const mappings = buildIntersectMappings(parameters, {
+      effects: templateEffectControls,
+      generators: GENERATORS,
+      audio: AUDIO_MAPPINGS,
+      blend: BLEND_MODES,
+      master: MASTER_CONTROLS,
+    });
+
+    res.json({
+      tree,
+      parameters,
+      shaders,
+      mappings,
+      oscQueryPort: vdmxConfig.oscQueryPort,
+    });
   } catch (e) {
     res.status(500).json({ error: "OSCQuery discovery failed" });
   }
+});
+
+// ─── VDMX Control Surface Template ───────────────────────────────────────────
+router.get('/control-surface-template', (_req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', 'attachment; filename="INTERSECT-Control-Surface.json"');
+  res.send(generateVdmxControlSurfaceJson());
 });
 
 // ─── Ableton Live Grid ────────────────────────────────────────────────────────

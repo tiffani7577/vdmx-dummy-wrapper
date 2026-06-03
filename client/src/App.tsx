@@ -7,7 +7,6 @@ import SongSwitcher from "@/pages/SongSwitcher";
 import Dashboard from "@/pages/Dashboard";
 import Home from "@/pages/Home";
 import { Route, Switch } from "wouter";
-import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 
 function Router() {

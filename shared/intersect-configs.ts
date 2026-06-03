@@ -91,3 +91,9 @@ export const BLEND_MODES = [
   { id: "overlay", name: "Punch", osc: "/intersect/blend/overlay" },
   { id: "normal", name: "Clean", osc: "/intersect/blend/normal" },
 ];
+
+export const MASTER_CONTROLS = [
+  { id: "opacity", name: "Master Opacity", osc: "/intersect/master/opacity" },
+  { id: "feedback", name: "Feedback", osc: "/intersect/master/feedback" },
+  { id: "color", name: "Color", osc: "/intersect/master/color" },
+];
