@@ -3,7 +3,7 @@ import OSCSender from '../services/osc-sender.js';
 import AbletonOSCService from '../services/ableton-osc.js';
 import { OSCQueryDiscovery } from '../services/oscquery-discovery.js';
 import { db } from '../db.js';
-import { songs, programSlots } from '../../drizzle/schema.js';
+import { songs, programSlots } from "../../drizzle/schema.js";
 import { eq } from 'drizzle-orm';
 
 const router = Router();
