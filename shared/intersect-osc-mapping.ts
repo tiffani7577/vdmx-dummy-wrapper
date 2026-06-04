@@ -38,7 +38,15 @@ export function normalizeOscName(value: string): string {
     .trim();
 }
 
-const EXCLUDED_PATH_FRAGMENTS = ["/oscquery/", "/apc ", "/apcbottom", "/apcbuttons"];
+const EXCLUDED_PATH_FRAGMENTS = [
+  "/apc ",
+  "/apcbottom",
+  "/apcbuttons",
+  "/audio analysis",
+  "/audioanalysis",
+  "/lfo",
+  "/numfx",
+];
 const GENERIC_WIDGET_NAMES = new Set([
   "slider",
   "button",
@@ -90,6 +98,16 @@ function matchKeys(item: MappableControl): string[] {
   return Array.from(keys);
 }
 
+function isWetDryParameter(param: OscQueryParameter): boolean {
+  const name = param.name.toLowerCase();
+  const address = param.address.toLowerCase();
+  return (
+    name.includes("wet") && name.includes("dry") ||
+    address.includes("wet / dry") ||
+    address.includes("wet/dry")
+  );
+}
+
 function scoreParameterMatch(
   item: MappableControl,
   param: OscQueryParameter,
@@ -99,6 +117,7 @@ function scoreParameterMatch(
   const paramName = normalizeOscName(param.name);
   const paramDesc = param.description ? normalizeOscName(param.description) : "";
   const addressLeaf = normalizeOscName(param.address.split("/").pop() ?? "");
+  const addressNorm = normalizeOscName(param.address);
 
   let best = 0;
 
@@ -111,6 +130,25 @@ function scoreParameterMatch(
         best = Math.max(best, 60);
       } else if (paramDesc.includes(key) || key.includes(paramDesc)) {
         best = Math.max(best, 40);
+      }
+      if (addressNorm.includes(key)) {
+        best = Math.max(best, 70);
+      }
+    }
+  }
+
+  if (isWetDryParameter(param)) {
+    for (const key of keys) {
+      if (key && addressNorm.includes(key)) {
+        best = Math.max(best, 130);
+      }
+    }
+  }
+
+  if (addressNorm.includes("control_surface")) {
+    for (const key of keys) {
+      if (key && (addressNorm.includes(key) || paramName.includes(key))) {
+        best = Math.max(best, 140);
       }
     }
   }

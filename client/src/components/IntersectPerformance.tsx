@@ -12,6 +12,21 @@ import {
   BLEND_MODES,
   MASTER_CONTROLS,
 } from '@shared/intersect-configs';
+import {
+  buildAllEffectsOffOscMessages,
+  buildChainTriggerPhases,
+  buildEffectToggleOscMessages,
+  chainFxIdsToOscAddresses,
+  resolveIntersectFxOsc,
+  CHAIN_OSC_BURST_WINDOW_MS,
+  EFFECT_OSC_ARG_TYPE,
+  MASTER_OSC_ARG_TYPE,
+  CONTROL_SURFACE_MASTER_OSC,
+  isAllowedIntersectOutboundOsc,
+  type FxOscPairRegistry,
+  type OscMessage,
+  type VdmxOscDiagnostics,
+} from '@shared/intersect-fx-osc';
 import { INTERSECT_TEMPLATE_EFFECTS } from '@shared/intersect-template-effects';
 import {
   generateVdmxControlSurfaceJson,
@@ -24,23 +39,30 @@ import IntersectHelp from '@/components/IntersectHelp';
 type ControlCategory = 'effects' | 'generators' | 'audio' | 'blend' | 'master';
 
 function buildFallbackMappings(): IntersectOscMappings {
-  const toMapped = (items: { id: string; name: string; osc: string }[]): MappedControl[] =>
-    items.map((item) => ({ ...item, address: item.osc, mapped: false }));
+  const toMapped = (
+    items: { id: string; name: string; osc: string }[],
+    preMapped = false
+  ): MappedControl[] =>
+    items.map((item) => ({
+      ...item,
+      address: item.osc,
+      mapped: preMapped,
+    }));
 
   const templateEffects = INTERSECT_TEMPLATE_EFFECTS.map((e) => ({
     id: e.id,
     name: e.intersectLabel,
-    osc: e.osc,
+    osc: resolveIntersectFxOsc(e.id) ?? e.osc,
   }));
 
   return {
-    effects: toMapped(templateEffects),
+    effects: toMapped(templateEffects, true),
     generators: toMapped(GENERATORS),
     audio: toMapped(AUDIO_MAPPINGS),
     blend: toMapped(BLEND_MODES),
-    master: toMapped(MASTER_CONTROLS),
+    master: toMapped(MASTER_CONTROLS, true),
     parameterCount: 0,
-    mappedCount: 0,
+    mappedCount: templateEffects.length + MASTER_CONTROLS.length,
   };
 }
 
@@ -80,6 +102,9 @@ export default function IntersectPerformance() {
   const [colorIntensity, setColorIntensity] = useState(100);
   const [mappings, setMappings] = useState<IntersectOscMappings>(buildFallbackMappings);
   const [refreshing, setRefreshing] = useState(false);
+  const [activeChainId, setActiveChainId] = useState<string | null>(null);
+  const [fxOscPairs, setFxOscPairs] = useState<FxOscPairRegistry>({});
+  const [vdmxDiagnostics, setVdmxDiagnostics] = useState<VdmxOscDiagnostics | null>(null);
   const pendingOscRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   const refreshConnection = useCallback(async () => {
@@ -89,11 +114,22 @@ export default function IntersectPerformance() {
       if (!res.ok) throw new Error('Discovery failed');
 
       const data = await res.json();
+      if (data?.fxOscPairs && typeof data.fxOscPairs === 'object') {
+        setFxOscPairs(data.fxOscPairs);
+      }
+      if (data?.diagnostics) {
+        setVdmxDiagnostics(data.diagnostics);
+      }
       if (data?.mappings) {
         setMappings(data.mappings);
         const { mappedCount, parameterCount } = data.mappings;
         if (parameterCount === 0) {
           toast.info('VDMX not found — import the Control Surface template first (Help tab)');
+        } else if (data?.diagnostics?.needsCanvasWiring) {
+          toast.warning(
+            'VDMX connected — Control Surface works, but Canvas FX needs one-time wiring (see banner below)',
+            { duration: 8000 }
+          );
         } else if (mappedCount > 0) {
           toast.success(`${mappedCount} of ${INTERSECT_TEMPLATE_EFFECTS.length} effects connected to VDMX`);
         } else {
@@ -120,22 +156,99 @@ export default function IntersectPerformance() {
     [mappings]
   );
 
-  const sendOSC = useCallback(async (address: string, value: number | string) => {
-    try {
-      await fetch('/api/vdmx/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          address,
-          args: [
-            typeof value === 'number' ? { type: 'f', value } : { type: 's', value },
-          ],
-        }),
-      });
-    } catch {
-      toast.error(`Could not reach VDMX (${labelFromAddress(address)})`);
-    }
-  }, []);
+  const sendOSC = useCallback(
+    async (
+      address: string,
+      value: number | string,
+      argType: 'i' | 'f' | 's' = typeof value === 'string' ? 's' : 'f'
+    ): Promise<boolean> => {
+      if (!isAllowedIntersectOutboundOsc(address)) {
+        console.warn('[INTERSECT OSC] blocked send to non-INTERSECT path:', address);
+        return false;
+      }
+      try {
+        const res = await fetch('/api/vdmx/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            address,
+            args: [
+              typeof value === 'number'
+                ? { type: argType, value }
+                : { type: 's' as const, value },
+            ],
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.success === false) {
+          console.error('[INTERSECT OSC] send failed:', address, data);
+          return false;
+        }
+        return true;
+      } catch (error) {
+        console.error('[INTERSECT OSC] send error:', address, error);
+        toast.error(`Could not reach VDMX (${labelFromAddress(address)})`);
+        return false;
+      }
+    },
+    []
+  );
+
+  const sendEffectOsc = useCallback(
+    (address: string, value: 0 | 1) => sendOSC(address, value, EFFECT_OSC_ARG_TYPE),
+    [sendOSC]
+  );
+
+  /** Fire many OSC messages in parallel within CHAIN_OSC_BURST_WINDOW_MS */
+  const sendOscBurst = useCallback(
+    async (messages: OscMessage[]) => {
+      if (messages.length === 0) return true;
+      const started = performance.now();
+      const results = await Promise.all(
+        messages.map(({ address, value, argType = EFFECT_OSC_ARG_TYPE }) =>
+          sendOSC(address, value, argType)
+        )
+      );
+      const elapsed = performance.now() - started;
+      if (elapsed > CHAIN_OSC_BURST_WINDOW_MS) {
+        console.warn(`[INTERSECT] OSC burst took ${elapsed.toFixed(0)}ms (target ≤${CHAIN_OSC_BURST_WINDOW_MS}ms)`);
+      }
+      return results.every(Boolean);
+    },
+    [sendOSC]
+  );
+
+  /** Run phases sequentially so off/on never race on the same address */
+  const sendOscPhased = useCallback(
+    async (phases: OscMessage[][]) => {
+      for (const phase of phases) {
+        const ok = await sendOscBurst(phase);
+        if (!ok) return false;
+      }
+      return true;
+    },
+    [sendOscBurst]
+  );
+
+  /** OSCQuery int + Canvas Wet/Dry float — both fire in parallel */
+  const sendEffectToggle = useCallback(
+    async (effectId: string, on: boolean) => {
+      const messages = buildEffectToggleOscMessages(effectId, on, fxOscPairs);
+      if (messages.length === 0) {
+        toast.error('Unknown effect');
+        return;
+      }
+      const ok = await sendOscBurst(messages);
+      if (!ok) {
+        toast.error('OSC send failed — check VDMX is running on port 1234');
+      }
+    },
+    [fxOscPairs, sendOscBurst]
+  );
+
+  const clearAllIntersectFx = useCallback(async () => {
+    await sendOscBurst(buildAllEffectsOffOscMessages(fxOscPairs));
+  }, [fxOscPairs, sendOscBurst]);
 
   const sendOscSmooth = useCallback(
     (address: string, value: number) => {
@@ -146,7 +259,7 @@ export default function IntersectPerformance() {
         address,
         setTimeout(() => {
           pending.delete(address);
-          sendOSC(address, value);
+          sendOSC(address, value, MASTER_OSC_ARG_TYPE);
         }, 80)
       );
     },
@@ -155,13 +268,20 @@ export default function IntersectPerformance() {
 
   const sendMaster = useCallback(
     (id: string, fallbackOsc: string, percent: number, immediate = false) => {
-      const address = resolveAddress('master', id, fallbackOsc);
+      const address =
+        id === 'opacity'
+          ? CONTROL_SURFACE_MASTER_OSC.opacity
+          : id === 'feedback'
+            ? CONTROL_SURFACE_MASTER_OSC.feedback
+            : id === 'color'
+              ? CONTROL_SURFACE_MASTER_OSC.color
+              : resolveAddress('master', id, fallbackOsc);
       const value = percent / 100;
       if (immediate) {
         const pending = pendingOscRef.current.get(address);
         if (pending) clearTimeout(pending);
         pendingOscRef.current.delete(address);
-        sendOSC(address, value);
+        sendOSC(address, value, MASTER_OSC_ARG_TYPE);
       } else {
         sendOscSmooth(address, value);
       }
@@ -175,11 +295,15 @@ export default function IntersectPerformance() {
     [mappedEffects]
   );
 
-  const toggleEffect = (id: string, fallbackOsc: string) => {
-    const address = resolveAddress('effects', id, fallbackOsc);
+  const toggleEffect = (id: string) => {
+    if (!resolveIntersectFxOsc(id)) {
+      toast.error('Unknown effect');
+      return;
+    }
     const isActive = activeEffects.includes(id);
+    setActiveChainId(null);
     setActiveEffects(isActive ? activeEffects.filter((e) => e !== id) : [...activeEffects, id]);
-    sendOSC(address, isActive ? 0 : 1);
+    sendEffectToggle(id, !isActive);
   };
 
   const triggerGenerator = (id: string, fallbackOsc: string) => {
@@ -188,34 +312,35 @@ export default function IntersectPerformance() {
   };
 
   const clearAllFX = async () => {
-    for (const id of activeEffects) {
-      const fx = mappedById.get(id);
-      if (fx) sendOSC(fx.address, 0);
-    }
+    await clearAllIntersectFx();
     setActiveEffects([]);
-    toast.info('All effects off');
+    setActiveChainId(null);
+    toast.info('All effects cleared');
   };
 
   const triggerChain = async (chain: (typeof CHAINS)[0]) => {
-    for (const id of activeEffects) {
-      const fx = mappedById.get(id);
-      if (fx) sendOSC(fx.address, 0);
+    const onAddresses = chain.fx ? chainFxIdsToOscAddresses(chain.fx) : [];
+    const phases = chain.fx ? buildChainTriggerPhases(chain.fx, fxOscPairs) : [buildAllEffectsOffOscMessages(fxOscPairs)];
+
+    const ok = await sendOscPhased(phases);
+    if (!ok) {
+      toast.error('Chain OSC failed — refresh connection and check VDMX ports');
+      return;
     }
 
     if (chain.fx) {
-      for (const fxId of chain.fx) {
-        const fx = mappedById.get(fxId);
-        if (fx) sendOSC(fx.address, 1);
-      }
-      setActiveEffects(chain.fx);
+      setActiveEffects(chain.fx.filter((id) => resolveIntersectFxOsc(id)));
+    } else {
+      setActiveEffects([]);
     }
+    setActiveChainId(chain.id);
 
     if (chain.generator) {
       const gen = mappings.generators.find((g) => g.id === chain.generator);
       if (gen) sendOSC(gen.address, 1);
     }
 
-    toast.success(`${chain.name} activated`);
+    toast.success(`${chain.name} — ${onAddresses.length} effects ON`);
   };
 
   const downloadTemplate = () => {
@@ -253,6 +378,31 @@ export default function IntersectPerformance() {
       </div>
 
       <Tabs defaultValue="perform" className="w-full">
+        <Card className="mb-4 p-4 bg-amber-950/30 border-amber-800/50">
+          <p className="text-xs text-amber-100/90 leading-relaxed">
+            <strong className="text-amber-200">Twitchy faders on the VDMX web page?</strong> That page syncs with APC hardware.
+            Close <span className="font-mono">localhost:2345/index.html?HTML</span> and perform from here only. Disable OSCQuery on APC plugins in VDMX.
+          </p>
+        </Card>
+
+        {vdmxDiagnostics?.needsCanvasWiring && (
+          <Card className="mb-4 p-4 bg-amber-950/40 border-amber-700/60">
+            <p className="text-sm text-amber-100 font-semibold">One-time VDMX wiring needed</p>
+            <p className="text-xs text-amber-200/80 mt-2 leading-relaxed">
+              INTERSECT is talking to VDMX ({vdmxDiagnostics.controlSurfaceEffectsFound} Control Surface
+              buttons found). Buttons update in VDMX, but Canvas FX Wet/Dry sliders are not linked yet.
+            </p>
+            <ol className="text-xs text-amber-100/90 mt-3 space-y-1.5 list-decimal list-inside">
+              <li>In VDMX, open your <strong>Control Surface</strong> and <strong>Canvas → Video FX</strong> side by side.</li>
+              <li>
+                <strong>Right-click-drag</strong> each Control Surface button onto its matching Wet/Dry slider
+                (e.g. Kaleidoscope button → Kaleidoscope Wet/Dry).
+              </li>
+              <li>Repeat for your effects, then tap Refresh Connection here.</li>
+            </ol>
+          </Card>
+        )}
+
         <TabsList className="grid grid-cols-2 bg-gray-900 p-1 rounded-xl border border-gray-800 h-auto max-w-xs">
           <TabsTrigger value="perform" className="data-[state=active]:bg-purple-600 data-[state=active]:text-white py-2">
             Perform
@@ -273,29 +423,29 @@ export default function IntersectPerformance() {
                 <MasterFader
                   label="Overall Brightness"
                   value={masterOpacity}
-                  onChange={(v) => {
+                  onChange={setMasterOpacity}
+                  onCommit={(v) => {
                     setMasterOpacity(v);
-                    sendMaster('opacity', MASTER_CONTROLS[0].osc, v, false);
+                    sendMaster('opacity', MASTER_CONTROLS[0].osc, v, true);
                   }}
-                  onCommit={(v) => sendMaster('opacity', MASTER_CONTROLS[0].osc, v, true)}
                 />
                 <MasterFader
                   label="Trail / Echo"
                   value={feedback}
-                  onChange={(v) => {
+                  onChange={setFeedback}
+                  onCommit={(v) => {
                     setFeedback(v);
-                    sendMaster('feedback', MASTER_CONTROLS[1].osc, v, false);
+                    sendMaster('feedback', MASTER_CONTROLS[1].osc, v, true);
                   }}
-                  onCommit={(v) => sendMaster('feedback', MASTER_CONTROLS[1].osc, v, true)}
                 />
                 <MasterFader
                   label="Color Intensity"
                   value={colorIntensity}
-                  onChange={(v) => {
+                  onChange={setColorIntensity}
+                  onCommit={(v) => {
                     setColorIntensity(v);
-                    sendMaster('color', MASTER_CONTROLS[2].osc, v, false);
+                    sendMaster('color', MASTER_CONTROLS[2].osc, v, true);
                   }}
-                  onCommit={(v) => sendMaster('color', MASTER_CONTROLS[2].osc, v, true)}
                 />
               </div>
               <Button
@@ -304,7 +454,7 @@ export default function IntersectPerformance() {
                 onClick={clearAllFX}
               >
                 <Trash2 className="w-3.5 h-3.5 mr-1.5" />
-                Clear FX
+                Clear All
               </Button>
             </div>
           </Card>
@@ -326,20 +476,32 @@ export default function IntersectPerformance() {
             </TabsList>
 
             <TabsContent value="chains" className="mt-4">
-              <p className="text-xs text-gray-500 mb-3">One tap loads a full look — multiple effects at once.</p>
+              <p className="text-xs text-gray-500 mb-3">
+                One tap clears all effects (OSCQuery int 0 + Wet/Dry float 0), then fires the chain
+                (both addresses int 1 / float 1.0) — within 50ms.
+              </p>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {CHAINS.map((chain) => (
+                {CHAINS.map((chain) => {
+                  const isChainActive = activeChainId === chain.id;
+                  return (
                   <Button
                     key={chain.id}
                     onClick={() => triggerChain(chain)}
-                    className="h-28 flex flex-col items-center justify-center gap-2 bg-gray-900 border-gray-800 hover:bg-gray-800 hover:border-pink-500/50"
+                    className={`h-28 flex flex-col items-center justify-center gap-2 border-2 ${
+                      isChainActive
+                        ? 'bg-pink-950/50 border-pink-500 hover:bg-pink-950/60'
+                        : 'bg-gray-900 border-gray-800 hover:bg-gray-800 hover:border-pink-500/50'
+                    }`}
                   >
-                    <span className="text-base font-bold">{chain.name}</span>
+                    <span className={`text-base font-bold ${isChainActive ? 'text-pink-200' : ''}`}>
+                      {chain.name}
+                    </span>
                     <span className="text-[10px] text-gray-500">
-                      {chain.fx.map((f) => mappedById.get(f)?.name).filter(Boolean).join(' · ')}
+                      {chain.fx?.map((f) => mappedById.get(f)?.name).filter(Boolean).join(' · ')}
                     </span>
                   </Button>
-                ))}
+                  );
+                })}
               </div>
             </TabsContent>
 
@@ -366,7 +528,12 @@ export default function IntersectPerformance() {
             <TabsContent value="effects" className="mt-4">
               <p className="text-xs text-gray-500 mb-3">
                 <span className="inline-block w-2 h-2 rounded-full bg-green-500 mr-1.5" />
-                Green = connected to VDMX · Purple = active
+                Green = VDMX linked ·{' '}
+                <span className="inline-block w-2 h-2 rounded-full bg-pink-500 mr-1.5" />
+                Pink = active (OSCQuery + Wet/Dry)
+                {activeEffects.length > 0 && (
+                  <span className="ml-2 text-pink-400">{activeEffects.length} ON</span>
+                )}
               </p>
               <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
                 {mappedEffects.map((fx) => {
@@ -375,10 +542,10 @@ export default function IntersectPerformance() {
                   return (
                     <Button
                       key={fx.id}
-                      onClick={() => toggleEffect(fx.id, fx.osc)}
-                      className={`h-14 text-xs font-bold uppercase tracking-wide border-2 ${
+                      onClick={() => toggleEffect(fx.id)}
+                      className={`h-14 text-xs font-bold uppercase tracking-wide border-2 transition-colors ${
                         isActive
-                          ? 'bg-purple-700 border-purple-400 text-white'
+                          ? 'bg-pink-600 border-pink-400 text-white shadow-[0_0_12px_rgba(236,72,153,0.45)]'
                           : isConnected
                             ? 'bg-green-950/40 border-green-600 text-green-100 hover:bg-green-900/50'
                             : 'bg-gray-950 border-gray-800 text-gray-500 hover:border-gray-600'
@@ -411,7 +578,7 @@ export default function IntersectPerformance() {
                         setActiveAudio(
                           isActive ? activeAudio.filter((a) => a !== map.id) : [...activeAudio, map.id]
                         );
-                        sendOSC(map.address, isActive ? 0 : 1);
+                        sendEffectOsc(map.address, isActive ? 0 : 1);
                       }}
                     >
                       <span className="text-sm font-medium text-left">{map.name}</span>

@@ -10,11 +10,10 @@ import {
   BLEND_MODES,
   MASTER_CONTROLS,
 } from '../../shared/intersect-configs.js';
+import { resolveIntersectFxOsc, discoverFxOscPairs, buildVdmxOscDiagnostics } from '../../shared/intersect-fx-osc.js';
 import { INTERSECT_TEMPLATE_EFFECTS } from '../../shared/intersect-template-effects.js';
-import { generateVdmxControlSurfaceJson } from '../../shared/vdmx-control-surface.js';
-import { db } from '../db.js';
-import { songs, programSlots } from "../../drizzle/schema.js";
-import { eq } from 'drizzle-orm';
+import { generateVdmxControlSurfaceJson, generateSetupGuideMarkdown } from '../../shared/vdmx-control-surface.js';
+import { listSongs, createSong, deleteSong } from '../services/songs-store.js';
 
 const router = Router();
 
@@ -85,7 +84,7 @@ router.post('/send', async (req: Request, res: Response) => {
   const { address, args } = req.body;
   if (!address) return res.status(400).json({ error: 'Missing OSC address' });
   
-  // Prevent feedback loops: don't send if the value is identical to the last one sent
+  // Prevent feedback loops: skip only exact duplicate sends (same address + args)
   const valKey = `${address}:${JSON.stringify(args)}`;
   if (lastSentValues[address] === valKey) {
     return res.json({ success: true, skipped: true });
@@ -100,12 +99,13 @@ router.post('/send', async (req: Request, res: Response) => {
   }
 });
 
-// ─── Dynamic Song Management ──────────────────────────────────────────────────
-router.get('/songs', async (req: Request, res: Response) => {
+// ─── Dynamic Song Management (JSON file store — no MySQL required) ───────────
+router.get('/songs', async (_req: Request, res: Response) => {
   try {
-    const allSongs = await db.select().from(songs).orderBy(songs.order);
+    const allSongs = await listSongs();
     res.json(allSongs);
   } catch (e) {
+    console.error('[Songs] Fetch failed:', e);
     res.status(500).json({ error: "Failed to fetch songs" });
   }
 });
@@ -113,18 +113,28 @@ router.get('/songs', async (req: Request, res: Response) => {
 router.post('/songs', async (req: Request, res: Response) => {
   try {
     const { name, bpm, mediaBinPage, vdmxPreset } = req.body;
-    const [newSong] = await db.insert(songs).values({ name, bpm, mediaBinPage, vdmxPreset });
-    res.json({ id: newSong.insertId });
+    const song = await createSong({ name, bpm, mediaBinPage, vdmxPreset });
+    res.json(song);
   } catch (e) {
-    res.status(500).json({ error: "Failed to create song" });
+    const message = e instanceof Error ? e.message : "Failed to create song";
+    console.error('[Songs] Create failed:', e);
+    res.status(message.includes("required") ? 400 : 500).json({ error: message });
   }
 });
 
 router.delete('/songs/:id', async (req: Request, res: Response) => {
   try {
-    await db.delete(songs).where(eq(songs.id, parseInt(req.params.id)));
+    const id = parseInt(req.params.id, 10);
+    if (Number.isNaN(id)) {
+      return res.status(400).json({ error: "Invalid song id" });
+    }
+    const removed = await deleteSong(id);
+    if (!removed) {
+      return res.status(404).json({ error: "Song not found" });
+    }
     res.json({ success: true });
   } catch (e) {
+    console.error('[Songs] Delete failed:', e);
     res.status(500).json({ error: "Failed to delete song" });
   }
 });
@@ -138,8 +148,8 @@ router.get('/discover', async (_req: Request, res: Response) => {
     const templateEffectControls = INTERSECT_TEMPLATE_EFFECTS.map((effect) => ({
       id: effect.id,
       name: effect.intersectLabel,
-      osc: effect.osc,
-      aliases: [effect.vdmxIsfName],
+      osc: resolveIntersectFxOsc(effect.id) ?? effect.osc,
+      aliases: [effect.vdmxIsfName, effect.isfFilename],
     }));
 
     const mappings = buildIntersectMappings(parameters, {
@@ -150,11 +160,16 @@ router.get('/discover', async (_req: Request, res: Response) => {
       master: MASTER_CONTROLS,
     });
 
+    const fxOscPairs = discoverFxOscPairs(parameters);
+    const diagnostics = buildVdmxOscDiagnostics(parameters);
+
     res.json({
       tree,
       parameters,
       shaders,
       mappings,
+      fxOscPairs,
+      diagnostics,
       oscQueryPort: vdmxConfig.oscQueryPort,
     });
   } catch (e) {
@@ -167,6 +182,12 @@ router.get('/control-surface-template', (_req: Request, res: Response) => {
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Content-Disposition', 'attachment; filename="INTERSECT-Control-Surface.json"');
   res.send(generateVdmxControlSurfaceJson());
+});
+
+router.get('/setup-guide', (_req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="INTERSECT-VDMX-Setup-Guide.md"');
+  res.send(generateSetupGuideMarkdown());
 });
 
 // ─── Ableton Live Grid ────────────────────────────────────────────────────────

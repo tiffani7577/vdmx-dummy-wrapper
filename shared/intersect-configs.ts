@@ -92,8 +92,10 @@ export const BLEND_MODES = [
   { id: "normal", name: "Clean", osc: "/intersect/blend/normal" },
 ];
 
+import { CONTROL_SURFACE_MASTER_OSC } from "./intersect-fx-osc.js";
+
 export const MASTER_CONTROLS = [
-  { id: "opacity", name: "Master Opacity", osc: "/intersect/master/opacity" },
-  { id: "feedback", name: "Feedback", osc: "/intersect/master/feedback" },
-  { id: "color", name: "Color", osc: "/intersect/master/color" },
+  { id: "opacity", name: "Master Opacity", osc: CONTROL_SURFACE_MASTER_OSC.opacity },
+  { id: "feedback", name: "Feedback", osc: CONTROL_SURFACE_MASTER_OSC.feedback },
+  { id: "color", name: "Color", osc: CONTROL_SURFACE_MASTER_OSC.color },
 ];

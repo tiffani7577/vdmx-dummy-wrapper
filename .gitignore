@@ -7,8 +7,8 @@ dist/
 build/
 *.dist
 
-# Environment variables
-.env
+# Runtime data (setlists, etc.)
+data/
 .env.local
 .env.development.local
 .env.test.local

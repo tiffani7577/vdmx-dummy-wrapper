@@ -10,7 +10,9 @@ import {
 } from '@shared/intersect-template-effects';
 import {
   generateVdmxControlSurfaceJson,
+  generateSetupGuideMarkdown,
   getTemplateDownloadFilename,
+  getSetupGuideFilename,
 } from '@shared/vdmx-control-surface';
 import { downloadTextFile } from '@/lib/download';
 import { Download, Clock, CheckCircle2, ExternalLink } from 'lucide-react';
@@ -22,6 +24,11 @@ export default function IntersectHelp() {
     toast.success('Control Surface template downloaded');
   };
 
+  const handleDownloadGuide = () => {
+    downloadTextFile(getSetupGuideFilename(), generateSetupGuideMarkdown());
+    toast.success('Setup guide downloaded');
+  };
+
   return (
     <div className="space-y-6">
       <Card className="p-5 bg-gray-950 border-gray-800">
@@ -29,18 +36,25 @@ export default function IntersectHelp() {
           <div>
             <h3 className="text-lg font-bold text-white">Plug-and-Play Setup</h3>
             <p className="text-sm text-gray-400 mt-1 max-w-2xl">
-              Download one file, import it into VDMX, enable OSCQuery, and INTERSECT connects automatically.
-              VDMX uses JSON layout files (Import JSON Layout in the Control Surface inspector).
+              Download the Control Surface JSON and one-page setup guide. Import into VDMX, build the
+              Canvas FX chain from the guide, enable OSCQuery, and INTERSECT connects automatically.
+              Every button sends OSC to the native Canvas Video FX Wet/Dry address — no manual mapping.
             </p>
             <div className="flex items-center gap-2 mt-3 text-xs text-gray-500">
               <Clock className="w-3.5 h-3.5" />
               Estimated setup time: ~{INTERSECT_SETUP_TIME_MINUTES} minutes
             </div>
           </div>
-          <Button onClick={handleDownload} className="bg-pink-600 hover:bg-pink-700 font-bold">
-            <Download className="w-4 h-4 mr-2" />
-            Generate VDMX Template
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={handleDownloadGuide} variant="outline" className="border-gray-700 font-bold">
+              <Download className="w-4 h-4 mr-2" />
+              Setup Guide
+            </Button>
+            <Button onClick={handleDownload} className="bg-pink-600 hover:bg-pink-700 font-bold">
+              <Download className="w-4 h-4 mr-2" />
+              Control Surface JSON
+            </Button>
+          </div>
         </div>
       </Card>
 
@@ -112,19 +126,19 @@ export default function IntersectHelp() {
           <ol className="space-y-3 text-sm text-gray-300">
             <li className="flex gap-3">
               <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-pink-600 text-xs font-bold">1</span>
-              <span>Click <strong className="text-white">Generate VDMX Template</strong> above and save the JSON file.</span>
+              <span>Download the <strong className="text-white">Setup Guide</strong> and add each ISF file to <strong className="text-white">Canvas → Video FX</strong> (Wet/Dry at 0).</span>
             </li>
             <li className="flex gap-3">
               <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-pink-600 text-xs font-bold">2</span>
-              <span>In VDMX: Workspace → Add Plugin → Control Surface → Import JSON Layout.</span>
+              <span>Import <strong className="text-white">INTERSECT-Control-Surface.json</strong> in VDMX → Control Surface → Import JSON Layout.</span>
             </li>
             <li className="flex gap-3">
               <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-pink-600 text-xs font-bold">3</span>
-              <span>Back in INTERSECT, open the Perform tab and click <strong className="text-white">Refresh Connection</strong>.</span>
+              <span>Enable <strong className="text-white">OSCQuery</strong>, rename the plugin to <strong className="text-green-400">{VDMX_CONTROL_SURFACE_NAME}</strong>.</span>
             </li>
             <li className="flex gap-3">
               <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-pink-600 text-xs font-bold">4</span>
-              <span>Mapped effect buttons turn <strong className="text-green-400">green</strong> — you&apos;re live.</span>
+              <span>In INTERSECT Perform tab, click <strong className="text-white">Refresh Connection</strong> — mapped buttons turn green.</span>
             </li>
           </ol>
         </Card>
@@ -135,23 +149,25 @@ export default function IntersectHelp() {
           Effect Name Reference
         </h4>
         <p className="text-xs text-gray-500 mb-4">
-          Each INTERSECT button maps to the VDMX ISF name below. OSC addresses are pre-configured in the template.
+          Each button toggles the native <strong className="text-gray-400">Wet / Dry</strong> OSC address for its ISF in the Canvas FX chain.
         </p>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-[10px] uppercase text-gray-500 border-b border-gray-800">
                 <th className="pb-2 pr-4">INTERSECT Button</th>
-                <th className="pb-2 pr-4">VDMX ISF Name</th>
-                <th className="pb-2 pr-4">OSC Address</th>
+                <th className="pb-2 pr-4">VDMX Button</th>
+                <th className="pb-2 pr-4">ISF File</th>
+                <th className="pb-2 pr-4">Native Wet/Dry OSC</th>
                 <th className="pb-2">Status</th>
               </tr>
             </thead>
             <tbody>
               {INTERSECT_TEMPLATE_EFFECTS.map((effect) => (
-                <tr key={effect.vdmxIsfName + effect.osc} className="border-b border-gray-900/80">
+                <tr key={effect.id} className="border-b border-gray-900/80">
                   <td className="py-2 pr-4 text-gray-300">{effect.intersectLabel}</td>
                   <td className="py-2 pr-4 font-medium text-white">{effect.vdmxIsfName}</td>
+                  <td className="py-2 pr-4 font-mono text-[11px] text-blue-300">{effect.isfFilename}</td>
                   <td className="py-2 pr-4 font-mono text-[11px] text-gray-500">{effect.osc}</td>
                   <td className="py-2">
                     {effect.bundledInVdmx ? (
@@ -174,6 +190,42 @@ export default function IntersectHelp() {
             </tbody>
           </table>
         </div>
+      </Card>
+
+      <Card className="p-5 bg-amber-950/20 border-amber-900/50">
+        <h4 className="text-sm font-bold text-amber-200 mb-2">Faders twitching or jumping?</h4>
+        <p className="text-xs text-amber-200/80 mb-3">
+          On <strong className="text-amber-100">localhost:2345/index.html?HTML</strong>, the left column
+          (<strong className="text-amber-100">APC Bottom</strong> faders) will twitch if your APC hardware is plugged in —
+          MIDI and the web page fight each other. INTERSECT only talks to <strong className="text-amber-100">Control_Surface_3</strong>, not APC.
+        </p>
+        <ol className="space-y-2 text-xs text-amber-200/70 list-decimal list-inside">
+          <li>
+            <strong className="text-amber-100">Do not use the VDMX web page for live control</strong> — close{' '}
+            <span className="font-mono text-amber-100/90">index.html?HTML</span> and use INTERSECT (port 3010/3011) instead.
+          </li>
+          <li>
+            In VDMX: on <strong className="text-amber-100">APC Bottom</strong> / <strong className="text-amber-100">APC Buttons</strong> plugins, turn off <strong className="text-amber-100">OSCQuery Enabled</strong> so they stop appearing on that page.
+          </li>
+          <li>
+            Only <strong className="text-amber-100">Control_Surface_3</strong> should publish OSCQuery for INTERSECT.
+          </li>
+          <li>
+            In VDMX, <strong className="text-amber-100">click the twitchy fader</strong> → UI Inspector → <strong className="text-amber-100">Receiving</strong> tab. Each line is a source (Audio Analysis filter, LFO, MIDI, OSC, etc.). Remove unwanted receivers with the <strong className="text-amber-100">−</strong> button.
+          </li>
+          <li>
+            Check <strong className="text-amber-100">Workspace → Plugins → Audio Analysis</strong>. If filters were dragged onto sliders, those sliders will bounce with the music until you disconnect them.
+          </li>
+          <li>
+            Look for <strong className="text-amber-100">LFO</strong> or <strong className="text-amber-100">NumFX</strong> plugins feeding the same parameter — disable or remove those receivers too.
+          </li>
+          <li>
+            On Control Surface sliders: turn off <strong className="text-amber-100">Enable Echo on all Receivers</strong> if MIDI hardware and OSC are both updating the same control.
+          </li>
+        </ol>
+        <p className="text-[11px] text-amber-200/50 mt-3">
+          Quick test: disable the Audio Analysis plugin entirely. If twitching stops, an audio receiver is the culprit — re-enable and clear receivers one by one.
+        </p>
       </Card>
 
       {EFFECTS_NEEDING_DOWNLOAD.length > 0 && (

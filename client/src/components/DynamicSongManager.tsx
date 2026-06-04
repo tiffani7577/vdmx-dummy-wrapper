@@ -20,40 +20,63 @@ export default function DynamicSongManager() {
   const fetchSongs = async () => {
     try {
       const res = await fetch('/api/vdmx/songs');
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data)) {
-          setSongs(data);
-        } else if (data && Array.isArray(data.songs)) {
-          setSongs(data.songs);
-        }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        toast.error(typeof data.error === 'string' ? data.error : 'Could not load setlist');
+        return;
+      }
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setSongs(data);
+      } else if (data && Array.isArray(data.songs)) {
+        setSongs(data.songs);
       }
     } catch (e) {
       console.error('[SONGS] Fetch failed:', e);
+      toast.error('Could not load setlist');
     }
   };
 
   useEffect(() => { fetchSongs(); }, []);
 
   const addSong = async () => {
-    if (!newSong.name) return toast.error('Song name is required');
-    const res = await fetch('/api/vdmx/songs', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newSong),
-    });
-    if (res.ok) {
+    if (!newSong.name.trim()) return toast.error('Song name is required');
+    try {
+      const res = await fetch('/api/vdmx/songs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...newSong,
+          name: newSong.name.trim(),
+          bpm: Number.isFinite(newSong.bpm) ? newSong.bpm : 120,
+          mediaBinPage: Number.isFinite(newSong.mediaBinPage) ? newSong.mediaBinPage : 0,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(typeof data.error === 'string' ? data.error : 'Could not add song');
+        return;
+      }
       toast.success('Song added to setlist');
       setNewSong({ name: '', bpm: 120, mediaBinPage: 0, vdmxPreset: '' });
       fetchSongs();
+    } catch {
+      toast.error('Could not reach server — is the app running?');
     }
   };
 
   const deleteSong = async (id: number) => {
-    const res = await fetch(`/api/vdmx/songs/${id}`, { method: 'DELETE' });
-    if (res.ok) {
+    try {
+      const res = await fetch(`/api/vdmx/songs/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        toast.error(typeof data.error === 'string' ? data.error : 'Could not delete song');
+        return;
+      }
       toast.success('Song removed');
       fetchSongs();
+    } catch {
+      toast.error('Could not reach server');
     }
   };
 
@@ -126,6 +149,9 @@ export default function DynamicSongManager() {
       </Card>
 
       <div className="grid grid-cols-1 gap-2">
+        {songs.length === 0 && (
+          <p className="text-xs text-gray-500 text-center py-4">No songs yet — add one above.</p>
+        )}
         {songs.map(song => (
           <div key={song.id} className="flex items-center justify-between p-3 bg-gray-900 border border-gray-800 rounded-lg group">
             <div className="flex items-center gap-4">

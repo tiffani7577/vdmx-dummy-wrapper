@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildIntersectMappings, mapControls, filterMappableParameters } from "../shared/intersect-osc-mapping";
 import { EFFECTS } from "../shared/intersect-configs";
+import { controlSurfaceOscQuery } from "../shared/intersect-fx-osc";
 
 describe("intersect-osc-mapping", () => {
   it("excludes APC / OSCQuery hardware control surfaces", () => {
@@ -12,6 +13,17 @@ describe("intersect-osc-mapping", () => {
 
     expect(filtered).toHaveLength(1);
     expect(filtered[0].name).toBe("Kaleidoscope");
+  });
+
+  it("excludes Audio Analysis and LFO data sources from auto-mapping", () => {
+    const filtered = filterMappableParameters([
+      { address: "/Audio Analysis/Filter 1/Level", name: "Level", type: "f" },
+      { address: "/LFO 1/Output", name: "Output", type: "f" },
+      { address: "/Canvas/Video FX/Bloom/Wet / Dry", name: "Wet / Dry", type: "f" },
+    ]);
+
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].address).toContain("Bloom");
   });
 
   it("maps Mirror Fold via VDMX ISF alias Kaleidoscope", () => {
@@ -53,6 +65,29 @@ describe("intersect-osc-mapping", () => {
     expect(kaleidoscope?.address).toBe("/vdmx/intersect/effects/Kaleidoscope");
     expect(kaleidoscope?.matchedName).toBe("Kaleidoscope");
     expect(kaleidoscope?.name).toBe("Mirror Fold");
+  });
+
+  it("maps Mirror Fold to Control Surface OSCQuery by button name", () => {
+    const address = controlSurfaceOscQuery("Kaleidoscope");
+    const parameters = [
+      { address, name: "Kaleidoscope", type: "i" },
+      { address: "/OSCQUERY/APC Bottom/FADERS", name: "FADERS", type: "f" },
+    ];
+
+    const mapped = mapControls(
+      [
+        {
+          id: "kaleidoscope",
+          name: "Mirror Fold",
+          osc: address,
+          aliases: ["Kaleidoscope"],
+        },
+      ],
+      parameters
+    );
+
+    expect(mapped[0]?.mapped).toBe(true);
+    expect(mapped[0]?.address).toBe(address);
   });
 
   it("falls back to hardcoded osc when no parameter matches", () => {

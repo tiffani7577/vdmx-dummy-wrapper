@@ -35,7 +35,7 @@ const STEPS = [
   {
     title: "Refresh in INTERSECT",
     content:
-      "Return to this dashboard. Open the Perform tab and click Refresh Connection. INTERSECT reads all parameters from OSCQuery on port 2345.",
+      "Return to this dashboard at http://localhost:3010 (not 3000 — that's often your other VDMX app). Open Perform and click Refresh Connection.",
     icon: <RefreshCw className="w-8 h-8 text-purple-500" />,
   },
   {
